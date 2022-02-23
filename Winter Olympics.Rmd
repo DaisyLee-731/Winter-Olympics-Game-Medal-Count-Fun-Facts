@@ -1,0 +1,465 @@
+---
+title: 'Assignment 1: Using ggplot2 for visualization'
+author: "Zhiqing Li"
+date: "2/8/2022"
+---
+
+```{r}
+load("my_work_space.RData")
+```
+
+# 1. Medal Counts over Time
+
+Load the datasets.
+```{r}
+library(readr)
+medal <- read_csv("data/athletes_and_events.csv")
+country <- read_csv("data/gdp_pop.csv")
+noc <- read_csv("data/noc_regions.csv")
+```
+
+Preliminary data processing.
+```{r}
+# filter the dataset, only look at winter Olympics; omit athletes who did not win any medals
+medal.winter <- medal[which(medal$Season == "Winter"), ]
+country <- country[complete.cases(country), ]
+
+#prepare to count medals
+library(dummies)
+medal.winter <- cbind(medal.winter, dummy(medal.winter$Medal))
+
+library(dplyr)
+winter.merge <- left_join(medal.winter, noc, by = "NOC")
+```
+
+
+```{r}
+#only count the winning events instead of the total number of medals
+region.year.event[4][region.year.event[4] >= 1] <- 1
+region.year.event[5][region.year.event[5] >= 1] <- 1
+region.year.event[6][region.year.event[6] >= 1] <- 1
+```
+
+
+```{r}
+#compute the total medals
+region.medal <- region.year.event %>% 
+  group_by(region) %>%
+  summarise(total = sum(gold, silver, bronze),
+            total.gold = sum(gold),
+            total.silver = sum(silver),
+            total.bronze = sum(bronze)) %>%
+  arrange(desc(total))
+region.medal
+```
+
+```{r}
+#compute the total attendance
+attendance.count <- region.year.event %>%
+  group_by(region, Year) %>%
+  summarise(attend = 1,
+    .groups = "drop")
+
+region.attendance <- attendance.count %>%
+  group_by(region) %>%
+  summarise( attendance = sum(attend), .groups = "drop")
+```
+
+```{r}
+#merge the two datasets
+medal.attendance <- merge(region.attendance,region.medal)
+medal.attendance <- medal.attendance %>% arrange(desc(total))
+head(medal.attendance)
+```
+```{r total count of medals for top 10 regions}
+#melt data for plotting
+library(reshape2)
+top.10.total <- medal.attendance[1:10, c(1, 4:6)]
+names(top.10.total) <- c("Country","Gold", "Silver", "Bronze")
+top.10.melt <- melt(top.10.total)
+```
+
+```{r}
+#start to plot the data
+library(ggplot2)
+
+positions <- rev(top.10.total$Country)
+
+top.10.count <- ggplot(top.10.melt, aes(value, Country)) +
+  geom_bar(aes(fill = variable), position = "stack", stat="identity")+
+  ggtitle("Top 10 Medal Winners in Winter Olympics History") +
+  xlab("")+
+  scale_y_discrete(limits = positions)+
+  scale_fill_brewer(palette="OrRd", direction = -1)+
+  theme_bw()
+
+top.10.count
+```
+
+```{r}
+#plot the attendance versus total medals
+top.10.attendance <- medal.attendance[1:10, 1:3]
+
+medal.per.game <- ggplot(top.10.attendance, aes(attendance, total, color = region))+
+  geom_point(size = 4)+
+  scale_color_brewer(palette="Set3")+
+  theme_minimal()
+
+medal.per.game
+```
+
+```{r}
+region.year.total <- region.year.event %>% 
+  group_by(region, Year) %>%
+  summarise(total = sum(gold, silver, bronze)) %>%
+  arrange(desc(total))
+
+top.10 = top.10.total$Country
+
+top.10.time.comparison <- region.year.total %>%
+  filter(region %in% top.10) %>% 
+  arrange(Year) %>%
+  group_by(region)%>% 
+  mutate(cumsum = cumsum(total))
+```
+
+```{r}
+library(rcartocolor)
+time.comparison <- ggplot(top.10.time.comparison, aes(Year, cumsum, color = region))+
+  geom_line(size = 1)+
+  scale_color_carto_d(palette = "Safe") +
+  ggtitle("Over Time Comparison of Top 10 Medal Winners in Winter Olympics") +
+  ylab("Cumulative Medals Over Time")+
+  xlim(c(1920, 2014))+
+  scale_x_continuous(breaks=seq(1924,2014,10))+
+  theme_bw()
+  
+time.comparison
+```
+
+I will recommend the third graph, since it is better-looking and conveys more information: we are  able to not only tell who ranks the first in terms of the total medals, but also see the time trends of each country.
+
+# 2. Medal Counts adjusted by Population, GDP
+
+```{r}
+names(top.10.attendance) <- c("Country", "Attendance", "Total")
+top.10.attendance$Country[top.10.attendance$Country == "USA"] <- "United States"
+top.10.attendance <- merge(top.10.attendance, country) 
+top.10.attendance <- top.10.attendance %>% arrange(desc(Total))
+positions <- rev(top.10.attendance$Country)
+```
+
+
+```{r unadjusted success rate}
+p.unadjusted <- ggplot(top.10.attendance, aes(Total, Country, fill = Population))+
+  geom_bar(stat="identity")+
+  rcartocolor::scale_fill_carto_c(palette = "DarkMint")+
+  ggtitle("Top 10 Medal Winners in Winter Olympics History") +
+  xlab("")+
+  scale_y_discrete(limits = positions)+
+  theme_bw()
+
+p.unadjusted 
+```
+If un-adjusted, the top 10 countries will be the countries above.
+
+```{r}
+#merge the data and calculate the top 10 this time
+unadjusted.2014 <- medal.attendance[, c(1,3)]
+names(unadjusted.2014) <- c("Country", "Total")
+
+unadjusted.2014 <- merge(unadjusted.2014, country)
+unadjusted.2014$Population = unadjusted.2014$Population/1000
+unadjusted.2014$pop.adj <- unadjusted.2014$Total / unadjusted.2014$Population
+```
+
+```{r}
+#screen the data based on population-adjusted medal counts
+pop.adjusted <- unadjusted.2014 %>% arrange(desc(pop.adj))
+pop.adjusted <- pop.adjusted[1:10, ]
+```
+
+```{r}
+#plot the population adjusted medal counts
+positions <- rev(pop.adjusted$Country)
+
+p.adju.pop <- ggplot(pop.adjusted, aes(pop.adj, Country, fill = Population)) +
+  geom_col(stat="identity")+
+  rcartocolor::scale_fill_carto_c(palette = "DarkMint")+
+  labs(title = "Top 10 Medal Winners in Winter Olympics History",
+       subtitle = "Adjusted by Population") +
+  xlab("Medals per thousand")+
+  scale_y_discrete(limits = positions)+
+  theme_bw()
+
+
+p.adju.pop
+```
+
+```{r}
+#screen the data based on GDP per capita adjusted medal counts
+unadjusted.2014$gdp.adj <- unadjusted.2014$Total / unadjusted.2014$`GDP per Capita`
+gdp.adjusted <- unadjusted.2014 %>% arrange(desc(gdp.adj))
+gdp.adjusted <- gdp.adjusted[1:10, ]
+```
+
+```{r}
+#plot the gdp per capita adjusted medal counts
+positions <- rev(gdp.adjusted$Country)
+
+p.adju.gdp <- ggplot(gdp.adjusted, aes(gdp.adj, Country, fill = Population)) +
+  geom_col(stat="identity")+
+  rcartocolor::scale_fill_carto_c(palette = "DarkMint")+
+  xlab("Medals per GDP output")+
+  scale_y_discrete(limits = positions)+
+  theme_bw() +
+  labs(title = "Top 10 Medal Winners in Winter Olympics History",
+       subtitle = "Adjusted by GDP per capita")
+
+p.adju.gdp
+```
+
+```{r}
+#prepare ranking data
+top.10.attendance$ranking <- seq(1,10)
+top.10.attendance$ranking.method <- "Unadjusted"
+
+pop.adjusted$ranking <- seq(1,10)
+pop.adjusted$ranking.method <- "Adjusted by Population"
+
+gdp.adjusted$ranking <- seq(1,10)
+gdp.adjusted$ranking.method <- "Adjusted by GDP per capita"
+
+ranking <- full_join(full_join(top.10.attendance, pop.adjusted), gdp.adjusted)
+```
+
+```{r}
+#rank the rankings using bump plot
+level_order <- factor(ranking$ranking.method, 
+               level = c("Unadjusted","Adjusted by Population","Adjusted by GDP per capita"))
+
+p.ranking <- ggplot(data = ranking, 
+                    aes(x = level_order, y = ranking, group = Country))+
+  geom_line(aes(color = Country, alpha = 1), size = 2) +
+  geom_point(aes(color = Country, alpha = 1), size = 2) +
+  scale_y_continuous(breaks=seq(0, 10, 1), limits=c(0, 10))+
+  rcartocolor::scale_fill_carto_c(palette = "DarkMint")+
+  #scale_y_reverse(breaks = 1:show.top.n) +
+  labs(x = "",
+       y = "Rank",
+       title = "Ranking Change based on Different Measures") +
+  theme_bw()
+
+p.ranking + theme(legend.position = "bottom") 
+
+# Reference: https://www.r-bloggers.com/2018/04/bump-chart/
+```
+
+We can see that a bump chart in this case is not very informative or pretty, we may just interpret the differences of rankings manually.
+
+```{r}
+library(ggpubr)
+ggarrange(p.unadjusted,p.adju.pop, p.adju.gdp,
+          ncol = 2, nrow = 2)
+```
+
+If we gather the pictures together, we can see that *Canada* and *Finland* are the best performers in Winter Olympics no matter using what adjustment measures.
+
+# 3. Host Country Advantage
+```{r}
+#load host cities and their related countries
+library(rvest)
+library(stringr)
+library(tidyverse)
+wiki_hosts <- read_html("https://en.wikipedia.org/wiki/List_of_Olympic_Games_host_cities")
+hosts <- html_table(html_nodes(wiki_hosts, "table")[[2]], fill=TRUE)[-1]
+hosts %>% filter(Winter != "") %>%
+  select(City, Country, Year)
+```
+
+```{r}
+#merge the host dataframe with our previously modified dataframe
+names(hosts)[names(hosts) == 'Country'] <- "region"
+hosts$region[hosts$region == "United States"] <- "USA"
+hosts$region[hosts$region == "United Kingdom"] <- "UK"
+host.medal.merge <- left_join(region.year.total, hosts)
+```
+
+```{r}
+#compute the mean as a benchmark
+host.mean <- host.medal.merge %>% 
+  group_by(region) %>% 
+  summarise(mean = mean(total))
+```
+
+```{r}
+#filter only the hosting countries
+host.full <- host.medal.merge %>% filter(region %in% hosts$region)
+host.medal <- left_join(host.full, host.mean)
+```
+
+```{r}
+#only the host years
+host.year.medal <- host.medal %>% filter(is.na(City) == F)
+df <- host.year.medal[-c(7,12,16,19,21,23,26,27,28,30,31,32), ]
+```
+
+```{r}
+#rank the host year means
+host.medal <- host.medal %>% arrange(desc(mean))
+levels = rev(host.medal$region)
+```
+
+
+```{r}
+host.effect <- ggplot(host.medal, aes(total, region)) +
+  geom_point(color = "gray", alpha = 0.3, size = 2) +
+  geom_point(aes(mean,region), color = "#3A6D6B", size = 2)+ #mean
+  geom_point(data = df, aes(total, region), color = "brown", size = 2)+ #host years
+  xlab("Medal Counts")+
+  ylab("Host Country")+
+  #scale_y_discrete(limits = levels)+
+  labs(title = "Host Effect Really Exists!", 
+       subtitle = "Red represents host years medal counts \nBlue represents average",
+       caption = "Only Count Winter Olympics")+
+  theme_minimal()
+
+host.effect
+```
+
+From the scatter plot above, we can see that in most of the times, host countries will perform better if they are the hosts. Therefore, we can confirm the host effect's existence.
+
+(Reference: https://www.kaggle.com/joshuaswords/does-hosting-the-olympics-improve-performance/notebook. )
+
+# 4. Most successful athletes
+## (a) Provide a visual display of the most successful Winte Olympics athletes of all time.
+
+```{r}
+#visualize the most successful athletes
+ath.rank.top9 <- medal.ath.rank[1:9, ]
+
+levels = rev(ath.rank.top9$Name)
+
+p.ath.top9 <- ggplot(ath.rank.top9, aes(total, Name, shape = region)) +
+  geom_point(size = 2) +
+  scale_shape_manual(values = c(3:8))+
+  scale_y_discrete(limits = levels)+
+  labs(title = "Most successful Winter Olympics: TOP 9",
+       subtitle = "Germany & Norway are the most productive countries",
+       x = "Total Medals")+
+  theme_classic2()
+
+p.ath.top9
+```
+
+## (b) Chose of of the athlete specific dimensions (e.g. gender, height, weight) and visualize an interesting pattern in the data.
+
+Assume only someone who is really good at certain sports can be selected as an Olympics player for this specific sport event. (A reasonable assumption!) I want to see whether specific figure (height, weight, BMI) suits some sports better. For example, there are some commonly shared views that "smaller" individuals may have better performance in ping pong balls, which requires better control of balance, and "bigger" individuals are better at confrontational events.
+
+```{r}
+#calculate BMI
+medal.ath$BMI <- medal.ath$Weight / (medal.ath$Height / 100)^2
+medal.ath.remove.NA <- subset(medal.ath, is.na(medal.ath$BMI) == F)
+```
+
+```{r}
+p.BMI <- ggplot(medal.ath.remove.NA, aes(BMI, Sport, fill = Sex)) +
+  geom_boxplot(alpha = 0.3)+
+  theme_linedraw()
+
+p.BMI
+```
+This graph is nor informative at all. Let me try to reorder it.
+
+```{r}
+#reorder the BMI
+medal.ath.remove.NA.reorder <- medal.ath.remove.NA %>% 
+  group_by(Sport, Sex) %>% 
+  summarise(BMI.mean = mean(BMI)) %>% 
+  arrange(desc(BMI.mean))
+
+medal.ath.remove.NA.reorder.no.sex <- medal.ath.remove.NA %>% 
+  group_by(Sport) %>% 
+  summarise(mean = mean(BMI)) %>% 
+  arrange(desc(mean))
+```
+
+```{r}
+positions.BMI <- rev(medal.ath.remove.NA.reorder.no.sex$Sport)
+
+p.BMI.reorder <- ggplot(medal.ath.remove.NA.reorder, aes(BMI.mean, Sport, color = Sex)) +
+  geom_point(alpha = 0.8, size = 2)+
+  scale_color_manual(values = c("pink","lightblue"))+
+  scale_y_discrete(limits = positions.BMI)+
+  geom_point(data = medal.ath.remove.NA.reorder.no.sex, aes(mean, Sport), color = "brown", size = 3)+
+  geom_vline(xintercept = 25, color = "gray", size = 1, alpha = 0.7)+
+  labs(title = "Athletes' BMI and Sports",
+       subtitle = "Bobsleigh & Ice Hockey needs overweight man",
+       x = "Average BMI",
+       caption = "BMI > 25 is overweight")+
+  theme_minimal()
+
+p.BMI.reorder
+```
+
+Now this plot is clear and informative. We now know that bobsleigh and ice hockey both tend to recruit overweight athletes, and smaller figure guys may perform better in figure skating, and ski jumping.
+
+# 5. Make two plots interactive
+The first graph I choose is athletes' BMIs and their relationship with sporting events, since I think it may be interesting for the audience to look closely at every specific BMI.
+
+```{r}
+library(plotly)
+ggplotly(p.BMI.reorder)
+```
+
+The second graph I pick is the top 10 countries with the highest medal counts. In the first static graph, we cannot tell specifically the number of gold medals, silver medals, and bronze medals for every country. So, it will be helpful if we add interaction to help audience quickly find it.
+
+```{r}
+top.10.total$Total <- top.10.total$Gold+top.10.total$Silver+top.10.total$Bronze
+top.10.total$Country <- factor(top.10.total$Country, 
+                               levels = unique(top.10.total$Country)
+                               [order(top.10.total$Total, decreasing = F)])
+
+plotly.medal.top10 <- plot_ly(top.10.total, x = ~Gold, y = ~Country, type = "bar", 
+                              name = "Gold Medal",
+                              marker = list(color = "#EAC705")) %>% 
+  add_trace(x = ~Silver, name = "Silver Medal",
+            marker = list(color = "#F9C4A2")) %>% 
+  add_trace(x = ~Bronze, name = "Bronze Medal",
+            marker = list(color = "#EA5F05")) %>% 
+  layout(xaxis = list(title = "Medal Counts"),
+         title = "Top 10 Medal Winners in Winter Olympics History",
+         barmode = 'stack')
+
+plotly.medal.top10
+```
+The result is quite good. The graph is clear, and if we move the mouse to a certain country, we know the gold/silver/bronze medal counts of a country.
+
+# 6. Data Table
+```{r}
+library(DT)
+datatable(medal.ath.remove.NA.reorder, filter = 'top')
+```
+*Endnotes*
+
+I am having problem with knitting the following codes:
+
+#group the data, count the medals
+region.year.event <- winter.merge %>% 
+  group_by(region, Year, Event) %>%
+  summarise(gold = sum(medal.winterGold), 
+            silver = sum(medal.winterSilver),
+            bronze = sum(medal.winterBronze))
+
+#prepare for visualization - build a clean dataframe
+medal.ath <- left_join(medal.winter, noc)
+medal.ath.rank <- medal.ath %>% 
+  group_by(Name, region) %>%
+  summarise(gold = sum(medal.winterGold), 
+            silver = sum(medal.winterSilver),
+            bronze = sum(medal.winterBronze),
+            total = sum(gold,silver,bronze)) %>%
+  arrange(desc(total))
+
+
+So, I delete the chunk and load R.data in the first of the document first. You can see my complete code in the .Rmd file.
